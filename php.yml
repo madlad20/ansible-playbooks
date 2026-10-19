@@ -1,0 +1,32 @@
+---
+# Lab 3: PHP paigaldamine klient1 (Debian) veebiserverisse
+# Debian 13-s ei ole php7 pakette - paketiga php ja state=latest
+# paigaldatakse viimane saadaval versioon (PHP 8.4)
+# Kontroll: ansible-playbook --check /root/playbooks/php.yml
+# Kaivitamine: ansible-playbook /root/playbooks/php.yml
+- hosts: klient1
+  tasks:
+    # 1. Paigaldame PHP ja Apache PHP mooduli apt mooduliga
+    - name: install php
+      apt:
+        name:
+          - php
+          - libapache2-mod-php
+        update_cache: yes
+        state: latest
+
+    # 2. Iseseisev ulesanne 1: loome PHP testfailid /var/www/html kataloogi
+    - name: Loome info.php ja phpinfo.php failid
+      copy:
+        dest: "/var/www/html/{{ item }}"
+        content: "<?php phpinfo(); ?>\n"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      loop:
+        - info.php
+        - phpinfo.php
+
+    # 3. Taaskaivitame Apache2, et PHP moodul laaditaks
+    - name: Apache2 taaskaivitamine
+      service: name=apache2 state=restarted

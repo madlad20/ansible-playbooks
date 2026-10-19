@@ -16,6 +16,8 @@ SKPVA kursuse Ansible labid – Chris-Luca Homenja (ITS24)
 - `ansible.cfg` – Ansible seadistus (Lab 1), serveris `/root/.ansible.cfg`
 - `apache2.yml` – Lab 2: Apache2 paigaldus, userdir moodul ja kasutaja `user` koduleht (`http://klient1/~user/`)
 - `index.yml` – Lab 2 iseseisev ülesanne: igale kliendile unikaalne avaleht hostinime ja IP-ga
+- `php.yml` – Lab 3: PHP (8.4) ja libapache2-mod-php paigaldus, `info.php` / `phpinfo.php` testfailid
+- `uninst_php.yml` – Lab 3 iseseisev ülesanne 2: PHP eemaldamine koos seotud pakettidega
 
 ## Käivitamine
 
@@ -24,4 +26,6 @@ ansible -m ping all
 ansible-playbook --check /root/playbooks/apache2.yml
 ansible-playbook /root/playbooks/apache2.yml
 ansible-playbook /root/playbooks/index.yml
+ansible-playbook /root/playbooks/php.yml
+ansible-playbook /root/playbooks/uninst_php.yml
 ```

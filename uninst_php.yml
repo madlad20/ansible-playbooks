@@ -1,0 +1,29 @@
+---
+# Iseseisev ulesanne 2: PHP eemaldamine klient1 serverist
+# Kasitsi eemaldamise kasud juhendist (meil on PHP versioon 8.4):
+#   apt-get purge php7.*          meil: apt-get purge php8.*
+#   apt-get purge php7.X-common   meil: apt-get purge php8.4-common
+#   apt remove php7.X*            meil: apt remove php8.4*
+# Kaivitamine: ansible-playbook /root/playbooks/uninst_php.yml
+- hosts: klient1
+  tasks:
+    # 1. Eemaldame koik PHP paketid koos seadistustega (purge)
+    - name: Eemaldame PHP ja seotud paketid
+      apt:
+        name:
+          - "php*"
+          - "libapache2-mod-php*"
+        state: absent
+        purge: yes
+        autoremove: yes
+
+    # 2. Eemaldame ka PHP testfailid
+    - name: Eemaldame info.php ja phpinfo.php
+      file: path=/var/www/html/{{ item }} state=absent
+      loop:
+        - info.php
+        - phpinfo.php
+
+    # 3. Taaskaivitame Apache2 ilma PHP moodulita
+    - name: Apache2 taaskaivitamine
+      service: name=apache2 state=restarted
