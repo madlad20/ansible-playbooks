@@ -1,0 +1,43 @@
+---
+# Lab 2: Apache2 paigaldamine ja userdir seadistamine klient1 (Debian) serveris
+# Kaivitamine: ansible-playbook /root/playbooks/apache2.yml
+- hosts: klient1
+  tasks:
+    # 1. Paigaldame Apache2 veebiserveri apt mooduliga
+    - name: installeerime apache2
+      apt: name=apache2 update_cache=yes state=latest
+
+    # Loome tavakasutaja user, kelle isiklikku kodulehte majutame
+    - name: Loome kasutaja user
+      user: name=user shell=/bin/bash create_home=yes
+
+    # Kodukataloog peab olema Apache jaoks loetav
+    - name: user kodukataloogi oigused
+      file: path=/home/user mode=0755
+
+    # 2. Loome kasutajale public_html kataloogi
+    - name: Loome public_html kataloog user_ile
+      file: path=/home/user/public_html owner=user group=user mode=0755 state=directory
+
+    # 3. Lubame Apache userdir mooduli
+    - name: Lubame userdir mod
+      apache2_module: name=userdir state=present
+
+    # 4. Taaskaivitame Apache2 teenuse
+    - name: Apache2 serverile alglaadimine(restart)
+      service: name=apache2 state=restarted enabled=yes
+
+    # 5. Kopeerime Apache vaikelehe kasutaja public_html kataloogi
+    - name: Kopeerime index.html fail USER_ile kodus_public_html kataloogi
+      copy: src=/var/www/html/index.html dest=/home/user/public_html/index.html remote_src=yes force=no owner=user group=user mode=0644
+
+    # 6. Teeme kasutaja lehe oma paraseks (pealkiri asendatakse)
+    - name: user index.html redigeerimine
+      lineinfile:
+        path: /home/user/public_html/index.html
+        regexp: '^\s*Apache2 Debian Default Page\s*$'
+        line: '            USERi lehekylg - Chris-Luca Homenja'
+
+    # Lopus taaskaivitame Apache2 uuesti
+    - name: Apache2 taaskaivitamine lopus
+      service: name=apache2 state=restarted

@@ -1,0 +1,28 @@
+---
+# Iseseisev ulesanne: igale kliendiserverile unikaalne /var/www/html/index.html
+# Kaivitamine: ansible-playbook /root/playbooks/index.yml
+- hosts: webservers
+  vars:
+    # Debianis on veebiserveri pakett apache2, CentOS-is httpd
+    veebiserver: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+  tasks:
+    # Paigaldame veebiserveri (package moodul valib apt voi dnf)
+    - name: Paigaldame veebiserveri
+      package: name={{ veebiserver }} state=present
+
+    # Loome unikaalse avalehe, kus on serveri hostinimi ja IP-aadress
+    - name: Unikaalne index.html
+      copy:
+        dest: /var/www/html/index.html
+        mode: '0644'
+        content: |
+          <html><head><title>{{ ansible_hostname }}</title></head>
+          <body>
+          <h1>Tere tulemast! See on server {{ ansible_hostname }}</h1>
+          <p>IP-aadress: {{ ansible_default_ipv4.address }}</p>
+          <p>Seadistatud Ansible abil - Chris-Luca Homenja</p>
+          </body></html>
+
+    # Kaivitame veebiserveri ja lubame selle alglaadimisel
+    - name: Veebiserver kaima
+      service: name={{ veebiserver }} state=started enabled=yes
