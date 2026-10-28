@@ -1,0 +1,73 @@
+---
+# Playbook: MySQL serveri paigaldamine kliendiserveritesse
+# Kontroll:  ansible-playbook --check /root/playbooks/mysql-server.yml
+# Kaivitus:  ansible-playbook /root/playbooks/mysql-server.yml
+- name: MySQL serveri paigaldamine ametlikust MySQL repositooriumist
+  hosts: mysqlserverid        # grupp failist /etc/ansible/hosts
+  become: true                # koik toimingud tehakse root oigustes
+  vars:
+    allalaadimised: /root/allalaadimised             # kataloog allalaaditud failide jaoks
+    mysql_apt_deb: mysql-apt-config_0.8.36-1_all.deb # MySQL APT repo konfiguratsioonipakett
+
+  tasks:
+    # 1. Loome kliendiserveris kataloogi allalaaditud asjade jaoks
+    - name: Loome allalaaditud kataloog
+      ansible.builtin.file:
+        path: "{{ allalaadimised }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    # 2. wget on vajalik .deb paketi allalaadimiseks
+    - name: Paigaldame wget
+      ansible.builtin.apt:
+        name: wget
+        state: present
+        update_cache: true
+
+    # 3. Laadime alla MySQL ametliku APT repositooriumi paketi
+    #    creates: kui fail on juba olemas, siis uuesti alla ei laeta
+    - name: Laadime MySQL APT paketi wget abil
+      ansible.builtin.shell: >
+        wget -O {{ allalaadimised }}/{{ mysql_apt_deb }}
+        https://dev.mysql.com/get/{{ mysql_apt_deb }}
+      args:
+        creates: "{{ allalaadimised }}/{{ mysql_apt_deb }}"
+
+    # 4. gnupg on vajalik repositooriumi GPG votmete importimiseks ja kontrolliks
+    - name: Paigalda gnupg
+      ansible.builtin.apt:
+        name: gnupg
+        state: present
+
+    # 5. Paigaldame .deb paketi (dpkg) -> lisab MySQL repo apt allikate loetellu
+    #    --check rezhiimis faili veel pole, seega viga ignoreeritakse ainult check-is
+    - name: Installeerime mysql repositoorium
+      ansible.builtin.apt:
+        deb: "{{ allalaadimised }}/{{ mysql_apt_deb }}"
+      environment:
+        DEBIAN_FRONTEND: noninteractive   # vaikevalikud, ilma dialoogiaknata
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    # 6. Peale repo lisamist uuendame pakettide nimekirja
+    - name: Teeme apt-le update
+      ansible.builtin.apt:
+        update_cache: true
+
+    # 7. Paigaldame MySQL serveri (MySQL ametlikust repositooriumist)
+    - name: Paigaldame mysql-server
+      ansible.builtin.apt:
+        name: mysql-server
+        state: present
+      environment:
+        DEBIAN_FRONTEND: noninteractive   # root saab auth_socket autentimise
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    # 8. Veendume, et MySQL teenus tootab ja kaivitub ka peale reboot-i
+    - name: MySQL teenus kaivitatud ja lubatud
+      ansible.builtin.service:
+        name: mysql
+        state: started
+        enabled: true
+      ignore_errors: "{{ ansible_check_mode }}"

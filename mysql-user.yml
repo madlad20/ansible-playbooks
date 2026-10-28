@@ -1,0 +1,72 @@
+---
+# Playbook: MySQL root kasutajale parooli seadmine + /root/.my.cnf
+# Kaivitus: ansible-playbook /root/playbooks/mysql-user.yml
+- name: MySQL root kasutaja seadistamine
+  hosts: mysqlserverid        # kliendiserverid failist /etc/ansible/hosts
+  become: true                # toimingud tehakse root oigustes
+  vars:
+    mysql_root_kasutaja: root
+    mysql_root_parool: qwerty
+    mysql_socket: /var/run/mysqld/mysqld.sock
+
+  tasks:
+    # 1. community.mysql moodulid vajavad Pythoni MySQL draiverit
+    - name: Paigaldame python3-pymysql
+      ansible.builtin.apt:
+        name: python3-pymysql
+        state: present
+
+    # 2. Seame root@localhost kasutajale parooli qwerty.
+    #    Vaikimisi on root-il auth_socket (sisse saab ilma paroolita).
+    #    Vahetame autentimise caching_sha2_password vastu -> nouab parooli.
+    #    check_implicit_admin: proovib esmalt ilma paroolita (1. kaivitus),
+    #    kui ei onnestu, siis login_password-iga (korduvad kaivitused).
+    - name: Seame MySQL root kasutajale parooli
+      community.mysql.mysql_user:
+        name: "{{ mysql_root_kasutaja }}"
+        host: localhost
+        plugin: caching_sha2_password
+        plugin_auth_string: "{{ mysql_root_parool }}"
+        priv: "*.*:ALL,GRANT"            # root jaab taisoigustega
+        state: present
+        login_unix_socket: "{{ mysql_socket }}"
+        login_user: "{{ mysql_root_kasutaja }}"
+        login_password: "{{ mysql_root_parool }}"
+        check_implicit_admin: true
+        column_case_sensitive: false    # vaikevaartus (eemaldab hoiatuse)
+
+    # 3. Salvestame uhenduse andmed faili /root/.my.cnf
+    #    -> root saab kasutada mysql kaske ilma parooli kasitsi sisestamata
+    #    mode 0600: faili saab lugeda ainult root (parool on failis)
+    - name: Loome faili /root/.my.cnf
+      ansible.builtin.copy:
+        dest: /root/.my.cnf
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          [client]
+          user={{ mysql_root_kasutaja }}
+          password={{ mysql_root_parool }}
+          socket={{ mysql_socket }}
+
+    # 4. Kontroll: ilma paroolita sisselogimine PEAB ebaonnestuma
+    #    --no-defaults = ei loe /root/.my.cnf faili
+    - name: Kontrollime, et ilma paroolita sisse ei saa
+      ansible.builtin.command: mysql --no-defaults -u root -e "SELECT 1"
+      register: ilma_paroolita
+      failed_when: ilma_paroolita.rc == 0
+      changed_when: false
+
+    # 5. Kontroll: parooliga (.my.cnf kaudu) sisselogimine tootab
+    - name: Kontrollime sisselogimist parooliga
+      ansible.builtin.command: mysql -e "SELECT user,host,plugin FROM mysql.user WHERE user='root'"
+      register: parooliga
+      changed_when: false
+
+    # 6. Naitame kontrollide tulemused
+    - name: Tulemused
+      ansible.builtin.debug:
+        msg:
+          - "Ilma paroolita: {{ ilma_paroolita.stderr }}"
+          - "Parooliga: {{ parooliga.stdout_lines }}"
