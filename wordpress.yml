@@ -1,0 +1,172 @@
+---
+# ============================================================================
+# Lab 5: WordPressi paigaldamise ja halduse automatiseerimine Ansible'iga
+# Autor: Chris-Luca Homenja (ITS24)
+# Ansible-server : lab4-ansible  192.168.37.148
+# Kliendiserver  : lab4-mysql    192.168.37.147  (grupp webservers)
+#
+# Playbook paigaldab kliendiserverisse taielikult toimiva WordPressi:
+#   1) veebiserver Apache2 + PHP
+#   2) MySQL andmebaas wpdatabase ja kasutaja wpuser
+#   3) WordPressi failid ametlikust arhiivist
+#   4) wp-config.php seadistamine andmebaasi andmetega
+#   5) PHP mysqli laiendus (iseseisev ulesanne 1)
+#   6) installi lopuleviimine wp-cli abil (iseseisev ulesanne 2)
+# ============================================================================
+
+- name: WordPress_Andmebaasi seadistamine
+  hosts: webservers
+  become: yes
+
+  vars:
+    wp_db_name: wpdatabase                        # andmebaasi nimi
+    wp_db_user: wpuser                            # andmebaasi kasutaja
+    wp_db_password: qwerty                        # andmebaasi kasutaja parool
+    wp_path: /var/www/html/wordpress              # WordPressi kataloog
+    wp_url: "http://192.168.37.147/wordpress"     # saidi aadress
+    wp_title: "admin wordpressi sait"             # saidi pealkiri
+    wp_admin_user: admin                          # WP administraatori kasutaja
+    wp_admin_password: qwerty                     # WP administraatori parool
+    wp_admin_email: admin@example.com             # WP administraatori e-post
+
+  tasks:
+
+    # ---- Veebiserver -------------------------------------------------------
+    # WordPress on PHP rakendus, seega kliendiserveris peab olema veebiserver
+    # koos PHP toega. Ilma selleta ei oleks ka kataloogi /var/www/html.
+    - name: Paigaldame veebiserveri Apache2 ja PHP
+      apt:
+        name:
+          - apache2
+          - php
+          - libapache2-mod-php
+        state: present
+        update_cache: yes
+
+    # ---- Andmebaasi eeldused ----------------------------------------------
+    # Ansible'i moodulid mysql_db ja mysql_user suhtlevad MySQL-iga Pythoni
+    # teegi PyMySQL kaudu. Ilma selleta annab playbook vea:
+    # "The PyMySQL (Python 2.7 and Python 3.X) or MySQL-python module is required".
+    - name: Paigaldame python3-pymysql
+      apt:
+        name: python3-pymysql
+        state: present
+        update_cache: yes
+
+    # WordPress vajab oma andmete (postitused, seaded, kasutajad) hoidmiseks
+    # eraldi andmebaasi.
+    - name: Loome andmebaas nimega-wpdatabase
+      mysql_db:
+        name: "{{ wp_db_name }}"
+        state: present
+
+    # Turvalisuse huvides ei kasuta WordPress root-kasutajat, vaid eraldi
+    # kasutajat, kellel on oigused ainult sellele uhele andmebaasile.
+    - name: Loome kasutaja nimega-wpuser parool-qwerty
+      mysql_user:
+        name: "{{ wp_db_user }}"
+        password: "{{ wp_db_password }}"
+        priv: "{{ wp_db_name }}.*:ALL,GRANT"
+        state: present
+        check_implicit_admin: yes
+
+    # ---- WordPressi failid -------------------------------------------------
+    # Kasutame ametlikku valmis arhiivi, seega faile ei pea kasitsi looma.
+    - name: Laeme alla WordPressi
+      get_url:
+        url: https://wordpress.org/latest.tar.gz
+        dest: /tmp/wordpress.tar.gz
+
+    - name: Pakime WordPressi lahti
+      unarchive:
+        src: /tmp/wordpress.tar.gz
+        dest: /var/www/html/
+        remote_src: yes
+
+    # ---- wp-config.php -----------------------------------------------------
+    # Naidisfailist tehakse pariskonfiguratsioon ja selles asendatakse
+    # votmesonad database_name_here / username_here / password_here meie
+    # andmebaasi seadistustega, et WordPress oskaks MySQL-iga uhenduda.
+    - name: Kopeerime wp-config-sample.php kui wp-config.php vajaliku kohta
+      copy:
+        src: "{{ wp_path }}/wp-config-sample.php"
+        dest: "{{ wp_path }}/wp-config.php"
+        remote_src: yes
+
+    - name: Maarame andmebaasi nime
+      lineinfile:
+        path: "{{ wp_path }}/wp-config.php"
+        regexp: "database_name_here"
+        line: "define('DB_NAME', '{{ wp_db_name }}');"
+
+    - name: Maarame andmebaasi kasutajanime
+      lineinfile:
+        path: "{{ wp_path }}/wp-config.php"
+        regexp: "username_here"
+        line: "define('DB_USER', '{{ wp_db_user }}');"
+
+    - name: Maarame andmebaasi kasutaja parooli
+      lineinfile:
+        path: "{{ wp_path }}/wp-config.php"
+        regexp: "password_here"
+        line: "define('DB_PASSWORD', '{{ wp_db_password }}');"
+
+    # ---- Iseseisev ulesanne 1 ---------------------------------------------
+    # Ilma PHP MySQL laienduseta kuvab WordPress veateate
+    # "Your PHP installation appears to be missing the MySQL extension".
+    # Debian 13 peal on PHP 8.4, seega php7.4-mysql asemel on oige pakk
+    # php-mysql (annab laiendused mysqli ja pdo_mysql).
+    - name: Paigaldame PHP MySQL laienduse php-mysql
+      apt:
+        name: php-mysql
+        state: present
+        update_cache: yes
+
+    # WordPress peab saama oma kataloogi kirjutada (uuendused, meedia).
+    - name: Seame WordPressi kataloogi omanikuks www-data
+      file:
+        path: "{{ wp_path }}"
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    # Uued PHP laiendused joustuvad alles peale Apache taaskaivitamist.
+    - name: Taaskaivita Apache teenus
+      service:
+        name: apache2
+        state: restarted
+
+    # ---- Iseseisev ulesanne 2 ---------------------------------------------
+    # WordPressi installiviisardi (keelevalik, saidi nimi, administraator)
+    # taidame automaatselt kasurea tooriistaga wp-cli, nii et brauseris ei
+    # pea midagi kasitsi vajutama.
+    # NB! Need kaks ulesannet on margitud sildiga wpcli, et neid saaks
+    # esimesel korral vahele jatta (--skip-tags wpcli) ja naidata brauseris
+    # WordPressi installatsioonilehte.
+    - name: Laeme alla tooriista wp-cli
+      get_url:
+        url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        dest: /usr/local/bin/wp
+        mode: '0755'
+      tags: wpcli
+
+    # wp core install kaivitatakse WordPressi kataloogis (args: chdir) ja
+    # valikuga --allow-root, sest Ansible kaivitab kasu root-kasutajana.
+    - name: Viime WordPressi installi lopuni (wp core install)
+      command: >
+        wp core install
+        --url="{{ wp_url }}"
+        --title="{{ wp_title }}"
+        --admin_user="{{ wp_admin_user }}"
+        --admin_password="{{ wp_admin_password }}"
+        --admin_email="{{ wp_admin_email }}"
+        --skip-email
+        --allow-root
+      args:
+        chdir: "{{ wp_path }}"
+      register: wp_install
+      changed_when: "'Success' in wp_install.stdout"
+      failed_when: >
+        wp_install.rc != 0 and
+        'already installed' not in (wp_install.stdout + wp_install.stderr)
+      tags: wpcli
